@@ -1,0 +1,135 @@
+name: Accessibility modal hardening
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  harden-modal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Patch custom modal accessibility
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('index.html')
+          text = path.read_text(encoding='utf-8')
+
+          marker = '/* ACCESSIBILITY_MODAL_HARDENED_V1 */'
+          if marker in text:
+              print('Modal accessibility patch already present.')
+              raise SystemExit(0)
+
+          pattern = re.compile(r"function open\\(d\\)\\{.*?\\}\\$\\('#language'\\)\\.value=L;", re.S)
+
+          replacement = r'''/* ACCESSIBILITY_MODAL_HARDENED_V1 */
+          let lastTrigger=null;
+          const modalEl=$('#modal');
+          const panelEl=modalEl.querySelector('.panel');
+          const closeEl=$('#close');
+          const backgroundEls=[...document.querySelectorAll('header,main,footer')];
+          const focusSelector='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+          function setBackgroundInert(value){
+            backgroundEls.forEach(el=>{
+              if(value) el.setAttribute('inert','');
+              else el.removeAttribute('inert');
+            });
+          }
+
+          function modalFocusables(){
+            return [...panelEl.querySelectorAll(focusSelector)].filter(el=>{
+              const style=getComputedStyle(el);
+              return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+            });
+          }
+
+          function open(d){
+            lastTrigger=document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            active=d;
+            $('#mPhoto').src=d.img;
+            $('#mPhoto').alt=d.name+' — '+d.country;
+            $('#mFlag').textContent=d.flag;
+            $('#mOrigin').textContent=d.country;
+            $('#modalTitle').textContent=d.name;
+            $('#mIntro').textContent=d.intro;
+            $('#mIng').innerHTML=d.ing.map(x=>`<li>${x}</li>`).join('');
+            $('#mMethod').innerHTML=d.method.map(x=>`<li>${x}</li>`).join('');
+            $('#mTaste').textContent=d.taste;
+            $('#mService').textContent=d.service;
+            $('#mStory').textContent=d.story;
+            $('#mCredit').textContent=d.credit;
+            modalEl.classList.add('open');
+            modalEl.setAttribute('aria-hidden','false');
+            setBackgroundInert(true);
+            document.body.classList.add('lock');
+            requestAnimationFrame(()=>{
+              const first=modalFocusables()[0]||closeEl;
+              first.focus();
+            });
+          }
+
+          function close(){
+            if(!modalEl.classList.contains('open')) return;
+            modalEl.classList.remove('open');
+            modalEl.setAttribute('aria-hidden','true');
+            setBackgroundInert(false);
+            document.body.classList.remove('lock');
+            if(lastTrigger && document.contains(lastTrigger)) requestAnimationFrame(()=>lastTrigger.focus());
+          }
+
+          closeEl.onclick=close;
+          modalEl.onclick=e=>{if(e.target===modalEl)close()};
+
+          document.addEventListener('keydown',e=>{
+            if(!modalEl.classList.contains('open')) return;
+            if(e.key==='Escape'){
+              e.preventDefault();
+              close();
+              return;
+            }
+            if(e.key!=='Tab') return;
+            const items=modalFocusables();
+            if(!items.length){e.preventDefault();closeEl.focus();return;}
+            const first=items[0],last=items[items.length-1];
+            if(!modalEl.contains(document.activeElement)){
+              e.preventDefault();
+              first.focus();
+            }else if(e.shiftKey && document.activeElement===first){
+              e.preventDefault();
+              last.focus();
+            }else if(!e.shiftKey && document.activeElement===last){
+              e.preventDefault();
+              first.focus();
+            }
+          });
+
+          $('#language').value=L;'''
+
+          patched, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Could not locate modal lifecycle in index.html; no changes made.')
+
+          path.write_text(patched, encoding='utf-8')
+          print('Accessibility modal hardening applied.')
+          PY
+
+      - name: Commit patch
+        run: |
+          if git diff --quiet -- index.html; then
+            echo "No patch required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "fix: harden modal accessibility"
+          git push
