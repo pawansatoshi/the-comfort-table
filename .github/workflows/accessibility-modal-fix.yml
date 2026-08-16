@@ -28,7 +28,7 @@ jobs:
               print('Modal accessibility patch already present.')
               raise SystemExit(0)
 
-          pattern = re.compile(r"function open\\(d\\)\\{.*?\\}\\$\\('#language'\\)\\.value=L;", re.S)
+          pattern = re.compile(r"function open\(d\)\{.*?\}\$\('#language'\)\.value=L;", re.S)
 
           replacement = r'''/* ACCESSIBILITY_MODAL_HARDENED_V1 */
           let lastTrigger=null;
